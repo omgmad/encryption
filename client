@@ -1,0 +1,50 @@
+import { expect } from "chai";
+import { ethers } from "hardhat";
+import type { EncryptSingleValue } from "../typechain-types";
+import { HardhatFhevmRuntimeEnvironment, FhevmType } from "@fhevm/hardhat-plugin";
+
+describe("EncryptSingleValue FHE", () => {
+  let contract: EncryptSingleValue;
+  let fhevm: HardhatFhevmRuntimeEnvironment;
+
+  before(async () => {
+    // Hardhat FHEVM plugin-ийг авах
+    fhevm = (await import("hardhat")).fhevm;
+  });
+
+  beforeEach(async () => {
+    const factory = await ethers.getContractFactory("EncryptSingleValue");
+    contract = (await factory.deploy()) as EncryptSingleValue;
+    await contract.deployed();
+  });
+
+  it("should encrypt and store a value", async () => {
+    // Create encrypted input for this contract + signer
+    const signers = await ethers.getSigners();
+    const alice = signers[1];
+
+    const input = fhevm.createEncryptedInput(contract.address, alice.address);
+    input.add32(2025); // encrypt the number 2025
+
+    // Perform local encryption → handles + proof
+    const encrypted = await input.encrypt();
+    const handle = encrypted.handles[0];
+    const proof = encrypted.inputProof;
+
+    // Pass encrypted handle + proof into smart contract call
+    await contract.connect(alice).initialize(handle, proof);
+
+    // Read the stored encrypted ciphertext
+    const stored = await contract.encryptedUint32();
+
+    // Decrypt locally to verify
+    const plain = await fhevm.userDecryptEuint(
+      FhevmType.euint32,
+      stored,
+      contract.address,
+      alice
+    );
+
+    expect(plain).to.equal(2025);
+  });
+});
